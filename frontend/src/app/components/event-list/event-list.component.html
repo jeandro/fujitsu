@@ -1,0 +1,43 @@
+<div class="card">
+  <h2>📋 Eventos Registrados</h2>
+
+  <div *ngIf="isLoading" class="alert alert-info">
+    Carregando lista de eventos...
+  </div>
+
+  <div *ngIf="errorMessage" class="alert alert-danger">
+    ⚠️ {{ errorMessage }}
+    <button (click)="loadEvents()" style="margin-left: 10px; padding: 4px 8px; font-size: 12px;">Tentar Novamente</button>
+  </div>
+
+  <div *ngIf="!isLoading && !errorMessage && events.length === 0" class="alert alert-info">
+    Nenhum evento registrado até o momento.
+  </div>
+
+  <table *ngIf="!isLoading && !errorMessage && events.length > 0">
+    <thead>
+      <tr>
+        <th>ID do Evento</th>
+        <th>Tipo</th>
+        <th>Descrição</th>
+        <th>Data / Hora</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngFor="let event of events">
+        <td><strong>{{ event.eventId }}</strong></td>
+        <td>
+          <span [ngClass]="{
+            'text-production': event.eventType === 'PRODUCTION',
+            'text-maintenance': event.eventType === 'MAINTENANCE',
+            'text-quality': event.eventType === 'QUALITY'
+          }">
+            {{ event.eventType }}
+          </span>
+        </td>
+        <td>{{ event.description }}</td>
+        <td>{{ event.timestamp | date:'dd/MM/yyyy HH:mm:ss' }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,52 @@
+<div class="card">
+  <h2>🏭 Cadastrar Evento de Fábrica</h2>
+
+  <form (ngSubmit)="onSubmit()" #eventForm="ngForm">
+    <div class="form-group">
+      <label for="eventId">ID do Evento *</label>
+      <input 
+        type="text" 
+        id="eventId" 
+        name="eventId" 
+        [(ngModel)]="eventId" 
+        maxlength="100" 
+        required 
+        placeholder="Ex: EVT-1001"
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="eventType">Tipo do Evento *</label>
+      <select id="eventType" name="eventType" [(ngModel)]="eventType" required>
+        <option *ngFor="let type of eventTypes" [value]="type.value">
+          {{ type.label }}
+        </option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="description">Descrição *</label>
+      <textarea 
+        id="description" 
+        name="description" 
+        [(ngModel)]="description" 
+        rows="3" 
+        maxlength="500" 
+        required 
+        placeholder="Descreva o evento do equipamento..."
+      ></textarea>
+    </div>
+
+    <button type="submit" [disabled]="!eventForm.form.valid || isSubmitting">
+      {{ isSubmitting ? 'Registrando...' : 'Registrar Evento' }}
+    </button>
+  </form>
+
+  <div *ngIf="successMessage" class="alert alert-success">
+    ✅ {{ successMessage }}
+  </div>
+
+  <div *ngIf="errorMessage" class="alert alert-danger">
+    ⚠️ {{ errorMessage }}
+  </div>
+</div>
