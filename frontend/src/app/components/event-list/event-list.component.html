@@ -1,43 +1,64 @@
-<div class="card">
-  <h2>📋 Eventos Registrados</h2>
-
-  <div *ngIf="isLoading" class="alert alert-info">
-    Carregando lista de eventos...
+<section aria-labelledby="list-title" [attr.aria-busy]="loading">
+  <div class="section-heading">
+    <h2 id="list-title">Eventos Registrados</h2>
+    <button type="button" (click)="loadEvents()" [disabled]="loading">
+      Atualizar eventos
+    </button>
   </div>
-
-  <div *ngIf="errorMessage" class="alert alert-danger">
-    ⚠️ {{ errorMessage }}
-    <button (click)="loadEvents()" style="margin-left: 10px; padding: 4px 8px; font-size: 12px;">Tentar Novamente</button>
+  <p class="hint">
+    Datas exibidas no fuso do navegador. Atualize para consultar eventos
+    recebidos de outros equipamentos.
+  </p>
+  <p *ngIf="loading" role="status">Carregando eventos…</p>
+  <div *ngIf="errorMessage" class="alert alert-danger" role="alert">
+    {{ errorMessage }}
+    <span *ngIf="events.length">A lista abaixo pode estar desatualizada.</span>
+    <button type="button" (click)="loadEvents()" [disabled]="loading">
+      Tentar novamente
+    </button>
   </div>
-
-  <div *ngIf="!isLoading && !errorMessage && events.length === 0" class="alert alert-info">
+  <p *ngIf="!loading && !errorMessage && events.length === 0" role="status">
     Nenhum evento registrado até o momento.
+  </p>
+  <div
+    class="table-scroll"
+    *ngIf="events.length > 0"
+    role="region"
+    aria-label="Tabela de eventos, role horizontalmente em telas pequenas"
+    tabindex="0"
+  >
+    <table>
+      <caption>
+        Eventos registrados, mais recentes primeiro
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">ID Evento</th>
+          <th scope="col">Tipo</th>
+          <th scope="col">Descrição</th>
+          <th scope="col">Data / Hora</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let evt of events; trackBy: trackEvent">
+          <td>
+            <strong>{{ evt.eventId }}</strong>
+          </td>
+          <td>
+            <span
+              class="badge"
+              [ngClass]="'badge-' + evt.eventType.toLowerCase()"
+              >{{ evt.eventType }}</span
+            >
+          </td>
+          <td class="description-cell">{{ evt.description }}</td>
+          <td>
+            <time [attr.datetime]="evt.timestamp">{{
+              evt.timestamp | date: "dd/MM/yyyy HH:mm:ss"
+            }}</time>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
-
-  <table *ngIf="!isLoading && !errorMessage && events.length > 0">
-    <thead>
-      <tr>
-        <th>ID do Evento</th>
-        <th>Tipo</th>
-        <th>Descrição</th>
-        <th>Data / Hora</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr *ngFor="let event of events">
-        <td><strong>{{ event.eventId }}</strong></td>
-        <td>
-          <span [ngClass]="{
-            'text-production': event.eventType === 'PRODUCTION',
-            'text-maintenance': event.eventType === 'MAINTENANCE',
-            'text-quality': event.eventType === 'QUALITY'
-          }">
-            {{ event.eventType }}
-          </span>
-        </td>
-        <td>{{ event.description }}</td>
-        <td>{{ event.timestamp | date:'dd/MM/yyyy HH:mm:ss' }}</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
+</section>

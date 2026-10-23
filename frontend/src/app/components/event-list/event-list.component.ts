@@ -1,49 +1,55 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { EventService } from '../../services/event.service';
-import { EventResponse } from '../../models/event.model';
-import { Subscription } from 'rxjs';
-
+import { Component, OnInit, OnDestroy } from "@angular/core";
+import { CommonModule } from "@angular/common";
+import { finalize, Subscription } from "rxjs";
+import { EventService } from "../../services/event.service";
+import { FactoryEvent } from "../../models/event.model";
+import { apiErrorMessage } from "../../services/api-error";
 @Component({
-  selector: 'app-event-list',
+  selector: "app-event-list",
   standalone: true,
   imports: [CommonModule],
-  templateUrl: './event-list.component.html'
+  templateUrl: "./event-list.component.html",
 })
 export class EventListComponent implements OnInit, OnDestroy {
-  events: EventResponse[] = [];
-  isLoading: boolean = false;
-  errorMessage: string = '';
-  private subscription!: Subscription;
-
+  private subscription?: Subscription;
+  events: FactoryEvent[] = [];
+  loading = false;
+  errorMessage: string | null = null;
+  private refreshPending = false;
   constructor(private eventService: EventService) {}
-
   ngOnInit(): void {
     this.loadEvents();
-    this.subscription = this.eventService.eventCreated$.subscribe(() => {
-      this.loadEvents();
-    });
+    this.subscription = this.eventService.eventCreated$.subscribe(() =>
+      this.loadEvents(),
+    );
   }
-
-  loadEvents(): void {
-    this.isLoading = true;
-    this.errorMessage = '';
-
-    this.eventService.getEvents().subscribe({
-      next: (data) => {
-        this.events = data;
-        this.isLoading = false;
-      },
-      error: () => {
-        this.errorMessage = 'Não foi possível carregar a lista de eventos. Verifique se o servidor backend está online.';
-        this.isLoading = false;
-      }
-    });
-  }
-
   ngOnDestroy(): void {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
+    this.subscription?.unsubscribe();
+  }
+  loadEvents(): void {
+    if (this.loading) {
+      this.refreshPending = true;
+      return;
     }
+    this.loading = true;
+    this.errorMessage = null;
+    this.eventService
+      .getEvents()
+      .pipe(
+        finalize(() => {
+          this.loading = false;
+          if (this.refreshPending) {
+            this.refreshPending = false;
+            this.loadEvents();
+          }
+        }),
+      )
+      .subscribe({
+        next: (data) => (this.events = data),
+        error: (err) => (this.errorMessage = apiErrorMessage(err)),
+      });
+  }
+  trackEvent(_index: number, event: FactoryEvent): string {
+    return event.eventId;
   }
 }

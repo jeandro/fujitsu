@@ -1,93 +1,90 @@
 package com.factory.events.service;
 
-import com.factory.events.dto.EventRequestDTO;
-import com.factory.events.dto.EventResponseDTO;
-import com.factory.events.exception.DuplicateEventException;
-import com.factory.events.model.AuditLog;
-import com.factory.events.model.EventType;
-import com.factory.events.model.FactoryEvent;
-import com.factory.events.repository.AuditRepository;
-import com.factory.events.repository.EventRepository;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.time.LocalDateTime;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
+import com.factory.events.dto.*;
+import com.factory.events.exception.DuplicateEventException;
+import com.factory.events.model.*;
+import com.factory.events.repository.*;
+import java.time.*;
+import java.util.List;
+import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Sort;
+
 class EventServiceTest {
 
-    @Mock
-    private EventRepository eventRepository;
+  EventRepository events;
+  AuditRepository audits;
+  EventService service;
+  final Instant now = Instant.parse("2026-05-20T13:00:00Z");
 
-    @Mock
-    private AuditRepository auditRepository;
+  @BeforeEach
+  void setup() {
+    events = mock(EventRepository.class);
+    audits = mock(AuditRepository.class);
+    service = new EventService(
+      events,
+      audits,
+      Clock.fixed(now, ZoneOffset.UTC)
+    );
+  }
 
-    @InjectMocks
-    private EventService eventService;
+  EventRequestDTO event(EventType type) {
+    var dto = new EventRequestDTO();
+    dto.setEventId(" TEST-1 ");
+    dto.setEventType(type);
+    dto.setDescription("Teste");
+    dto.setTimestamp(now);
+    return dto;
+  }
 
-    private EventRequestDTO requestDTO;
+  @Test
+  void productionDoesNotAudit() {
+    var result = service.processEvent(event(EventType.PRODUCTION));
+    assertEquals("TEST-1", result.getEventId());
+    assertEquals(now, result.getTimestamp());
+    verify(events).saveAndFlush(any());
+    verifyNoInteractions(audits);
+  }
 
-    @BeforeEach
-    void setUp() {
-        requestDTO = new EventRequestDTO("EVT-1001", EventType.PRODUCTION, "Início da esteira 01", LocalDateTime.now());
-    }
+  @Test
+  void qualityRecordsContentAndSameClockInstant() {
+    service.processEvent(event(EventType.QUALITY));
+    var capture = ArgumentCaptor.forClass(AuditLog.class);
+    verify(audits).save(capture.capture());
+    assertEquals("TEST-1", capture.getValue().getEventId());
+    assertEquals(now, capture.getValue().getCreatedAt());
+    assertTrue(capture.getValue().getLogMessage().contains("Teste"));
+  }
 
-    @Test
-    @DisplayName("Deve processar e salvar evento de produção com sucesso")
-    void testProcessEventProductionSuccess() {
-        when(eventRepository.existsByEventId("EVT-1001")).thenReturn(false);
-        FactoryEvent savedEvent = new FactoryEvent("EVT-1001", EventType.PRODUCTION, "Início da esteira 01", LocalDateTime.now());
-        when(eventRepository.save(any(FactoryEvent.class))).thenReturn(savedEvent);
+  @Test
+  void duplicateDoesNotWriteAnything() {
+    when(events.existsByEventId("TEST-1")).thenReturn(true);
+    assertThrows(DuplicateEventException.class, () ->
+      service.processEvent(event(EventType.QUALITY))
+    );
+    verify(events, never()).saveAndFlush(any());
+    verifyNoInteractions(audits);
+  }
 
-        EventResponseDTO response = eventService.processEvent(requestDTO);
+  @Test
+  void listMapsAndOrdersEvents() {
+    when(events.findAll(any(Sort.class))).thenReturn(
+      List.of(new FactoryEvent("X", EventType.PRODUCTION, "d", now))
+    );
+    assertEquals("X", service.findAllEvents().get(0).getEventId());
+  }
 
-        assertNotNull(response);
-        assertEquals("EVT-1001", response.getEventId());
-        verify(auditRepository, never()).save(any(AuditLog.class));
-    }
-
-    @Test
-    @DisplayName("Deve salvar log de auditoria ao processar evento de QUALIDADE")
-    void testProcessEventQualityAuditSuccess() {
-        requestDTO.setEventType(EventType.QUALITY);
-        when(eventRepository.existsByEventId("EVT-1001")).thenReturn(false);
-        FactoryEvent savedEvent = new FactoryEvent("EVT-1001", EventType.QUALITY, "Defeito detectado", LocalDateTime.now());
-        when(eventRepository.save(any(FactoryEvent.class))).thenReturn(savedEvent);
-
-        EventResponseDTO response = eventService.processEvent(requestDTO);
-
-        assertNotNull(response);
-        verify(auditRepository, times(1)).save(any(AuditLog.class));
-    }
-
-    @Test
-    @DisplayName("Deve lançar DuplicateEventException quando ID do evento já existir")
-    void testProcessEventDuplicateThrowsException() {
-        when(eventRepository.existsByEventId("EVT-1001")).thenReturn(true);
-
-        assertThrows(DuplicateEventException.class, () -> eventService.processEvent(requestDTO));
-        verify(eventRepository, never()).save(any(FactoryEvent.class));
-    }
-
-    @Test
-    @DisplayName("Deve listar todos os eventos cadastrados com sucesso")
-    void testFindAllEventsSuccess() {
-        FactoryEvent event = new FactoryEvent("EVT-1001", EventType.PRODUCTION, "Linha ativa", LocalDateTime.now());
-        when(eventRepository.findAll()).thenReturn(List.of(event));
-
-        List<EventResponseDTO> events = eventService.findAllEvents();
-
-        assertEquals(1, events.size());
-        assertEquals("EVT-1001", events.get(0).getEventId());
-    }
+  @Test
+  void unrelatedIntegrityErrorIsNotDuplicate() {
+    when(events.saveAndFlush(any())).thenThrow(
+      new org.springframework.dao.DataIntegrityViolationException("other")
+    );
+    assertThrows(
+      org.springframework.dao.DataIntegrityViolationException.class,
+      () -> service.processEvent(event(EventType.PRODUCTION))
+    );
+  }
 }

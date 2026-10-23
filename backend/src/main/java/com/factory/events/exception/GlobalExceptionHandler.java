@@ -1,95 +1,88 @@
 package com.factory.events.exception;
 
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.web.HttpMediaTypeNotSupportedException;
-import org.springframework.web.HttpRequestMethodNotSupportedException;
+import com.factory.events.dto.ApiError;
+import java.time.Instant;
+import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.*;
+import org.springframework.lang.Nullable;
 import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
-    @ExceptionHandler(DuplicateEventException.class)
-    public ResponseEntity<Map<String, Object>> handleDuplicateEvent(DuplicateEventException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.CONFLICT.value());
-        response.put("error", "Conflito de Duplicidade");
-        response.put("message", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
-    }
+  private static final Logger log = LoggerFactory.getLogger(
+    GlobalExceptionHandler.class
+  );
 
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, Object>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.CONFLICT.value());
-        response.put("error", "Conflito de Dados");
-        response.put("message", "O evento informado já foi registrado ou viola restrições de integridade.");
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
-    }
+  private ApiError body(int status, String message, String requestId) {
+    return new ApiError(Instant.now(), status, message, requestId, Map.of());
+  }
 
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<Map<String, Object>> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.BAD_REQUEST.value());
-        response.put("error", "Requisição Inválida");
-        response.put("message", "O corpo da requisição é inválido, malformado ou contém tipos de dados incompatíveis.");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
-    }
+  @ExceptionHandler(DuplicateEventException.class)
+  public ResponseEntity<Object> duplicate(DuplicateEventException ex) {
+    return ResponseEntity.status(409).body(
+      body(409, ex.getMessage(), UUID.randomUUID().toString())
+    );
+  }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidationExceptions(MethodArgumentNotValidException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.BAD_REQUEST.value());
-        response.put("error", "Erro de Validação");
+  @Override
+  protected ResponseEntity<Object> handleMethodArgumentNotValid(
+    MethodArgumentNotValidException ex,
+    HttpHeaders headers,
+    HttpStatusCode status,
+    WebRequest request
+  ) {
+    Map<String, String> errors = new LinkedHashMap<>();
+    ex.getBindingResult()
+      .getFieldErrors()
+      .forEach(e -> errors.put(e.getField(), e.getDefaultMessage()));
+    ApiError result = new ApiError(
+      Instant.now(),
+      400,
+      "Verifique os campos informados.",
+      UUID.randomUUID().toString(),
+      errors
+    );
+    return new ResponseEntity<>(result, headers, status);
+  }
 
-        Map<String, String> fieldErrors = new HashMap<>();
-        ex.getBindingResult().getFieldErrors().forEach(error -> 
-            fieldErrors.put(error.getField(), error.getDefaultMessage())
-        );
+  @Override
+  protected ResponseEntity<Object> handleExceptionInternal(
+    Exception ex,
+    @Nullable Object ignored,
+    HttpHeaders headers,
+    HttpStatusCode status,
+    WebRequest request
+  ) {
+    String message = switch (status.value()) {
+      case 400 -> "JSON inválido. Confira os campos, o tipo do evento e a data/hora ISO 8601.";
+      case 404 -> "Recurso não encontrado.";
+      case 405 -> "Método HTTP não permitido para este recurso.";
+      case 415 -> "Formato não suportado. Utilize Content-Type: application/json.";
+      default -> "Não foi possível atender à solicitação.";
+    };
+    return new ResponseEntity<>(
+      body(status.value(), message, UUID.randomUUID().toString()),
+      headers,
+      status
+    );
+  }
 
-        response.put("fieldErrors", fieldErrors);
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
-    }
-
-    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public ResponseEntity<Map<String, Object>> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.METHOD_NOT_ALLOWED.value());
-        response.put("error", "Método Não Permitido");
-        response.put("message", "O método HTTP " + ex.getMethod() + " não é suportado para este endpoint.");
-        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(response);
-    }
-
-    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
-    public ResponseEntity<Map<String, Object>> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.UNSUPPORTED_MEDIA_TYPE.value());
-        response.put("error", "Tipo de Mídia Não Suportado");
-        response.put("message", "O Content-Type fornecido não é suportado. Utilize 'application/json'.");
-        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(response);
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleGenericException(Exception ex) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
-        response.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
-        response.put("error", "Erro Interno do Servidor");
-        response.put("message", "Ocorreu um erro interno inesperado. Por favor, tente novamente mais tarde.");
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
-    }
+  @ExceptionHandler(Exception.class)
+  public ResponseEntity<Object> unexpected(Exception ex) {
+    String id = UUID.randomUUID().toString();
+    log.error("Falha inesperada requestId={}", id, ex);
+    return ResponseEntity.internalServerError().body(
+      body(
+        500,
+        "Erro interno. Tente novamente ou informe o identificador ao suporte.",
+        id
+      )
+    );
+  }
 }

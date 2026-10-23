@@ -25,3 +25,5 @@ backend/target/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+**/.local-backup/

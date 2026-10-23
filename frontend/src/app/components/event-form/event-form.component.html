@@ -1,52 +1,106 @@
-<div class="card">
-  <h2>🏭 Cadastrar Evento de Fábrica</h2>
-
-  <form (ngSubmit)="onSubmit()" #eventForm="ngForm">
-    <div class="form-group">
-      <label for="eventId">ID do Evento *</label>
-      <input 
-        type="text" 
-        id="eventId" 
-        name="eventId" 
-        [(ngModel)]="eventId" 
-        maxlength="100" 
-        required 
-        placeholder="Ex: EVT-1001"
+<section aria-labelledby="form-title">
+  <h2 id="form-title">Cadastrar Novo Evento</h2>
+  <div *ngIf="successMessage" class="alert alert-success" role="status">
+    {{ successMessage }}
+  </div>
+  <div *ngIf="errorMessage" class="alert alert-danger" role="alert">
+    {{ errorMessage }}
+  </div>
+  <form
+    (ngSubmit)="onSubmit(eventForm)"
+    #eventForm="ngForm"
+    [attr.aria-busy]="submitting"
+  >
+    <fieldset [disabled]="submitting">
+      <div class="form-group">
+        <label for="eventId">ID do Evento (Ex: EVT-1001):</label>
+        <input
+          id="eventId"
+          name="eventId"
+          [(ngModel)]="eventId"
+          required
+          maxlength="100"
+          pattern=".*\S.*"
+          #idField="ngModel"
+          aria-describedby="id-help id-error"
+          [attr.aria-invalid]="
+            (idField.touched && idField.invalid) || !!fieldErrors['eventId']
+          "
+          placeholder="Informe o ID único do evento"
+        />
+        <small id="id-help"
+          >Até 100 caracteres. Espaços nas extremidades serão removidos.</small
+        >
+        <p
+          id="id-error"
+          class="field-error"
+          *ngIf="(idField.touched && idField.invalid) || fieldErrors['eventId']"
+        >
+          {{
+            fieldErrors["eventId"] ||
+              "Informe um ID com conteúdo e até 100 caracteres."
+          }}
+        </p>
+      </div>
+      <div class="form-group">
+        <label for="eventType">Tipo do Evento:</label>
+        <select
+          id="eventType"
+          name="eventType"
+          [(ngModel)]="eventType"
+          required
+          aria-describedby="type-error"
+          [attr.aria-invalid]="!!fieldErrors['eventType']"
+        >
+          <option value="PRODUCTION">PRODUCTION (Produção Normal)</option>
+          <option value="MAINTENANCE">MAINTENANCE (Manutenção)</option>
+          <option value="QUALITY">QUALITY (Exige Auditoria)</option>
+        </select>
+        <p id="type-error" class="field-error" *ngIf="fieldErrors['eventType']">
+          {{ fieldErrors["eventType"] }}
+        </p>
+      </div>
+      <div class="form-group">
+        <label for="description">Descrição:</label>
+        <textarea
+          id="description"
+          name="description"
+          [(ngModel)]="description"
+          required
+          maxlength="1000"
+          pattern="[\s\S]*\S[\s\S]*"
+          #descriptionField="ngModel"
+          rows="3"
+          aria-describedby="description-help description-error"
+          [attr.aria-invalid]="
+            (descriptionField.touched && descriptionField.invalid) ||
+            !!fieldErrors['description']
+          "
+          placeholder="Descreva o evento ocorrido na linha de fábrica"
+        ></textarea>
+        <small id="description-help"
+          >{{ description.length }} / 1000 caracteres</small
+        >
+        <p
+          id="description-error"
+          class="field-error"
+          *ngIf="
+            (descriptionField.touched && descriptionField.invalid) ||
+            fieldErrors['description']
+          "
+        >
+          {{
+            fieldErrors["description"] ||
+              "Informe uma descrição com conteúdo e até 1000 caracteres."
+          }}
+        </p>
+      </div>
+      <button
+        type="submit"
+        [disabled]="submitting || !valid || !eventForm.valid"
       >
-    </div>
-
-    <div class="form-group">
-      <label for="eventType">Tipo do Evento *</label>
-      <select id="eventType" name="eventType" [(ngModel)]="eventType" required>
-        <option *ngFor="let type of eventTypes" [value]="type.value">
-          {{ type.label }}
-        </option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label for="description">Descrição *</label>
-      <textarea 
-        id="description" 
-        name="description" 
-        [(ngModel)]="description" 
-        rows="3" 
-        maxlength="500" 
-        required 
-        placeholder="Descreva o evento do equipamento..."
-      ></textarea>
-    </div>
-
-    <button type="submit" [disabled]="!eventForm.form.valid || isSubmitting">
-      {{ isSubmitting ? 'Registrando...' : 'Registrar Evento' }}
-    </button>
+        {{ submitting ? "Registrando…" : "Registrar Evento" }}
+      </button>
+    </fieldset>
   </form>
-
-  <div *ngIf="successMessage" class="alert alert-success">
-    ✅ {{ successMessage }}
-  </div>
-
-  <div *ngIf="errorMessage" class="alert alert-danger">
-    ⚠️ {{ errorMessage }}
-  </div>
-</div>
+</section>

@@ -1,7 +1,7 @@
 export enum EventType {
-  PRODUCTION = 'PRODUCTION',
-  MAINTENANCE = 'MAINTENANCE',
-  QUALITY = 'QUALITY'
+  PRODUCTION = "PRODUCTION",
+  MAINTENANCE = "MAINTENANCE",
+  QUALITY = "QUALITY",
 }
 
 export interface EventRequest {
@@ -17,3 +17,5 @@ export interface EventResponse {
   description: string;
   timestamp: string;
 }
+
+export type FactoryEvent = EventResponse;
