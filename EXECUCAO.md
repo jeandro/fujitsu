@@ -120,3 +120,10 @@ Entregar fontes, README, pom.xml, package-lock.json e scripts de build. Excluir 
 
 - Springdoc: https://springdoc.org/v2/
 - JaCoCo Maven: https://www.jacoco.org/jacoco/trunk/doc/maven.html
+
+
+## Windows: EPERM no esbuild durante npm ci
+
+Antes de executar `npm ci`, encerre `npm start`, `ng serve`, `ng build --watch` e os testes em modo watch com Ctrl+C nos terminais correspondentes. Esses processos podem manter `node_modules/@esbuild/win32-x64/esbuild.exe` aberto; o Windows impede que o npm substitua um executável em uso.
+
+Depois, execute `npm ci` e aguarde a conclusão antes de iniciar `npm start`. Não execute duas instalações simultâneas. Se uma instalação interrompida deixar a pasta incompleta, preserve-a fora de `node_modules` e reinstale pelo lockfile. Não é necessário alterar o package-lock ou desativar o antivírus para a correção aplicada aqui.
