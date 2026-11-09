@@ -9,6 +9,7 @@ import com.factory.events.domain.model.result.EventPage;
 import com.factory.events.domain.port.out.EventRepositoryPort;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,15 +56,16 @@ class ListEventsUseCaseImplTest {
   @Test
   void findByEventIdReturnsEvent() {
     var evento = new FactoryEvent(1L, "EVT-1", EventType.PRODUCTION, "Teste", now);
-    when(events.findByEventId("EVT-1")).thenReturn(evento);
+    when(events.findByEventId("EVT-1")).thenReturn(Optional.of(evento));
     var result = service.findByEventId("EVT-1");
-    assertEquals("EVT-1", result.eventId());
+    assertTrue(result.isPresent());
+    assertEquals("EVT-1", result.orElseThrow().eventId());
   }
 
   @Test
-  void findByEventIdReturnsNullWhenNotFound() {
-    when(events.findByEventId("EVT-NOTFOUND")).thenReturn(null);
+  void findByEventIdReturnsEmptyWhenNotFound() {
+    when(events.findByEventId("EVT-NOTFOUND")).thenReturn(Optional.empty());
     var result = service.findByEventId("EVT-NOTFOUND");
-    assertNull(result);
+    assertTrue(result.isEmpty());
   }
 }

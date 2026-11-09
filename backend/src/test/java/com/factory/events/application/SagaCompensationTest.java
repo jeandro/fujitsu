@@ -17,7 +17,9 @@ import com.factory.events.domain.port.out.OutboxPort;
 import com.factory.events.domain.port.out.SagaInstancePort;
 import com.factory.events.domain.port.out.SagaStepPort;
 import com.factory.events.application.saga.RegisterEventSaga;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,7 @@ class SagaCompensationTest {
   AuditRepositoryPort audits;
   OutboxPort outbox;
   ClockPort clock;
+  ObjectMapper objectMapper;
   RegisterEventSaga saga;
 
   final String sagaId = "saga-quality-1";
@@ -51,19 +54,19 @@ class SagaCompensationTest {
     "EVT-QUAL-FAIL", EventType.QUALITY, "Falha de inspecao", now);
 
   @BeforeEach
-  void setup() {
+  void setup() throws Exception {
     sagaInstance = mock(SagaInstancePort.class);
     sagaStep = mock(SagaStepPort.class);
     events = mock(EventRepositoryPort.class);
     audits = mock(AuditRepositoryPort.class);
     outbox = mock(OutboxPort.class);
     clock = mock(ClockPort.class);
+    objectMapper = mock(ObjectMapper.class);
+    when(objectMapper.writeValueAsString(any())).thenReturn("{}");
     when(clock.now()).thenReturn(now);
     when(sagaInstance.createSagaInstance(any(), any(), any())).thenReturn(sagaId);
-    when(sagaInstance.markSagaSucceeded(sagaId)).thenReturn(true);
-    when(sagaInstance.markSagaFailedCompensated(sagaId, anyString())).thenReturn(true);
 
-    saga = new RegisterEventSaga(sagaInstance, sagaStep, events, audits, outbox, clock);
+    saga = new RegisterEventSaga(sagaInstance, sagaStep, events, audits, outbox, clock, objectMapper);
   }
 
   @Test
@@ -93,7 +96,7 @@ class SagaCompensationTest {
     verify(sagaStep, never()).compensate(eq(sagaId), eq(1));
 
     // ASSERT: saga marcada como FAILED_COMPENSATED
-    verify(sagaInstance).markSagaFailedCompensated(sagaId, anyString());
+    verify(sagaInstance).markSagaFailedCompensated(eq(sagaId), anyString());
     verify(sagaInstance, never()).markSagaSucceeded(sagaId);
   }
 
@@ -126,27 +129,13 @@ class SagaCompensationTest {
       .thenReturn(new SagaStepOutcome.Completed());
     when(sagaStep.execute(eq(sagaId), eq(1), any(SagaStepInput.class)))
       .thenReturn(new SagaStepOutcome.Completed());
-    var savedEvent = new FactoryEventStub("EVT-QUAL-OK", EventType.QUALITY, "ok", now);
-    when(events.findByEventId("EVT-QUAL-OK")).thenReturn(savedEvent);
+    var savedEvent = new FactoryEvent(1L, "EVT-QUAL-FAIL", EventType.QUALITY, "Falha de inspecao", now);
+    when(events.findByEventId("EVT-QUAL-FAIL")).thenReturn(Optional.of(savedEvent));
 
     var result = saga.execute(command);
 
     assertTrue(result instanceof RegisterEventResult.Success);
     verify(sagaInstance).markSagaSucceeded(sagaId);
     verify(sagaStep, never()).compensate(any(), anyInt());
-  }
-
-  // Value object minimo para retorno de findByEventId
-  private static class FactoryEventStub {
-    final String eventId;
-    final EventType eventType;
-    final String description;
-    final Instant timestamp;
-    FactoryEventStub(String eventId, EventType eventType, String description, Instant timestamp) {
-      this.eventId = eventId;
-      this.eventType = eventType;
-      this.description = description;
-      this.timestamp = timestamp;
-    }
   }
 }

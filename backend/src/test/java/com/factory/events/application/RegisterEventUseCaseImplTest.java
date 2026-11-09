@@ -1,6 +1,10 @@
 package com.factory.events.application;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.factory.events.domain.model.EventType;
@@ -8,10 +12,10 @@ import com.factory.events.domain.model.FactoryEvent;
 import com.factory.events.domain.model.RegisterEventCommand;
 import com.factory.events.domain.model.result.RegisterEventResult;
 import com.factory.events.domain.port.out.AuditRepositoryPort;
-import com.factory.events.domain.port.out.ClockPort;
 import com.factory.events.domain.port.out.EventRepositoryPort;
 import com.factory.events.domain.port.out.OutboxPort;
 import com.factory.events.application.saga.RegisterEventSaga;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,20 +25,20 @@ class RegisterEventUseCaseImplTest {
   EventRepositoryPort events;
   AuditRepositoryPort audits;
   OutboxPort outbox;
-  ClockPort clock;
   RegisterEventSaga saga;
+  ObjectMapper objectMapper;
   RegisterEventUseCaseImpl service;
   final Instant now = Instant.parse("2026-05-20T13:00:00Z");
 
   @BeforeEach
-  void setup() {
+  void setup() throws Exception {
     events = mock(EventRepositoryPort.class);
     audits = mock(AuditRepositoryPort.class);
     outbox = mock(OutboxPort.class);
-    clock = mock(ClockPort.class);
-    when(clock.now()).thenReturn(now);
     saga = mock(RegisterEventSaga.class);
-    service = new RegisterEventUseCaseImpl(events, audits, outbox, clock, saga);
+    objectMapper = mock(ObjectMapper.class);
+    when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+    service = new RegisterEventUseCaseImpl(events, audits, outbox, saga, objectMapper);
   }
 
   RegisterEventCommand cmd(EventType type) {

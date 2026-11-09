@@ -112,7 +112,7 @@ public class RegisterEventSaga {
 
     sagaInstance.markSagaSucceeded(sagaId);
     return events.findByEventId(command.eventId())
-      .map(RegisterEventResult.Success::new)
+      .<RegisterEventResult>map(RegisterEventResult.Success::new)
       .orElseGet(() -> new RegisterEventResult.Failure(
         "Evento não encontrado após registro (eventId=" + command.eventId() + ")"
       ));

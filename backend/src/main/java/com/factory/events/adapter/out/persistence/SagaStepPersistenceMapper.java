@@ -6,7 +6,7 @@ public final class SagaStepPersistenceMapper {
 
   public static SagaStepJpaEntity toJpa(Long id, Long sagaId, int seq, String name,
                                         String state, String compensationState,
-                                        java.time.Instant updatedAt) {
-    return new SagaStepJpaEntity(id, sagaId, seq, name, state, compensationState, updatedAt);
+                                        String eventId, java.time.Instant updatedAt) {
+    return new SagaStepJpaEntity(id, sagaId, seq, name, state, compensationState, eventId, updatedAt);
   }
 }

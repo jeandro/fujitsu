@@ -31,10 +31,14 @@ import org.springframework.web.context.WebApplicationContext;
 @SpringBootTest
 class AuthorizationTest {
 
-  @Autowired
-  private WebApplicationContext context;
+  private final WebApplicationContext context;
 
   private MockMvc mockMvc;
+
+  @Autowired
+  AuthorizationTest(WebApplicationContext context) {
+    this.context = context;
+  }
 
   @BeforeEach
   void setup() {

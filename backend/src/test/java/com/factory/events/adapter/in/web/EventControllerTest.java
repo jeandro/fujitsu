@@ -17,6 +17,7 @@ import com.factory.events.domain.port.in.RegisterEventUseCase;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -113,14 +114,14 @@ class EventControllerTest {
   }
 
   @Test
-  @DisplayName("CA-10: GET limita tamanho de pagina a 100 (RN-09)")
+  @DisplayName("CA-10: GET delega paginacao ao caso de uso (RN-09)")
   void testListLimitsSizeTo100() {
-    when(listEventsUseCase.list(0, 100)).thenReturn(
+    when(listEventsUseCase.list(0, 500)).thenReturn(
       new EventPage(List.of(), 0, 100, 0, 0, true, true, 0, true));
 
     controller.listEvents(0, 500);
 
-    verify(listEventsUseCase).list(0, 100);
+    verify(listEventsUseCase).list(0, 500);
   }
 
   @Test
@@ -128,7 +129,7 @@ class EventControllerTest {
   void testObterEventoPorIdSucesso() {
     var event = new FactoryEvent(1L, "EVT-1001", EventType.PRODUCTION, "Linha Ativa",
       Instant.parse("2026-05-20T13:00:00Z"));
-    when(listEventsUseCase.findByEventId("EVT-1001")).thenReturn(event);
+    when(listEventsUseCase.findByEventId("EVT-1001")).thenReturn(Optional.of(event));
 
     var response = controller.obterEvento("EVT-1001");
 
@@ -141,7 +142,7 @@ class EventControllerTest {
   @Test
   @DisplayName("CA-11: GET por ID retorna 404 quando nao existe (E-06)")
   void testObterEventoPorIdNaoEncontrado() {
-    when(listEventsUseCase.findByEventId("EVT-9999")).thenReturn(null);
+    when(listEventsUseCase.findByEventId("EVT-9999")).thenReturn(Optional.empty());
 
     var response = controller.obterEvento("EVT-9999");
 

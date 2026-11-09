@@ -1,7 +1,9 @@
 package com.factory.events.config;
 
 import com.factory.events.domain.port.out.ClockPort;
+import com.factory.events.domain.port.out.IdempotencyStore;
 import com.factory.events.adapter.in.web.IdempotencyFilter;
+import tools.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -23,15 +25,21 @@ public class ApplicationConfig {
     return () -> Instant.now(clock);
   }
 
+  @Bean
+  public IdempotencyFilter idempotencyFilterBean(IdempotencyStore idempotencyStore, ObjectMapper objectMapper) {
+    return new IdempotencyFilter(idempotencyStore, objectMapper);
+  }
+
   /**
    * Registra o filtro de idempotência apenas para POST /v1/events.
    */
   @Bean
-  public FilterRegistrationBean<IdempotencyFilter> idempotencyFilter(IdempotencyFilter filter) {
+  public FilterRegistrationBean<IdempotencyFilter> idempotencyFilterRegistration(IdempotencyFilter idempotencyFilterBean) {
     FilterRegistrationBean<IdempotencyFilter> registration = new FilterRegistrationBean<>();
-    registration.setFilter(filter);
+    registration.setFilter(idempotencyFilterBean);
     registration.setUrlPatterns(List.of("/v1/events"));
     registration.setOrder(1);
+    registration.setName("idempotencyFilter");
     return registration;
   }
 }

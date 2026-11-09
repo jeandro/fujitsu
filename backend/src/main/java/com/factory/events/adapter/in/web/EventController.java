@@ -81,7 +81,7 @@ public class EventController {
     return switch (result) {
       case RegisterEventResult.Success s -> ResponseEntity
         .created(URI.create("/v1/events/" + s.event().eventId()))
-        .body(EventApiMapper.toResponse(s.event()));
+        .body(EventApiMapper.toResponse(s.event(), confidentialAuthorized()));
       case RegisterEventResult.Duplicate d -> ResponseEntity
         .status(HttpStatus.CONFLICT)
         .body(new Problem(

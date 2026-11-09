@@ -3,7 +3,7 @@ package com.factory.events.adapter.in.web;
 import com.factory.events.adapter.in.web.dto.Problem;
 import com.factory.events.domain.model.result.IdempotencyOutcome;
 import com.factory.events.domain.port.out.IdempotencyStore;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -29,7 +28,6 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
  * diferente) e 409 idempotency-in-progress (execução concorrente). Replay
  * idêntico para mesma chave + mesmo corpo (RN-03, RN-04, RN-05).
  */
-@Component
 public class IdempotencyFilter extends OncePerRequestFilter {
 
   private static final String SCOPE = "events-api:register";
