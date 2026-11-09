@@ -26,7 +26,19 @@
             "styles": [
               "src/styles.css"
             ],
-            "scripts": []
+            "scripts": [],
+          "budgets": [
+            {
+              "type": "initial",
+              "maximumWarning": "180 KB",
+              "maximumError": "200 KB"
+            },
+            {
+              "type": "anyComponentStyle",
+              "maximumWarning": "6 KB",
+              "maximumError": "10 KB"
+            }
+          ]
           }
         },
         "serve": {
@@ -50,7 +62,8 @@
             ],
             "assets": [
               "src/favicon.svg"
-            ]
+            ],
+            "codeCoverage": true
           }
         }
       }

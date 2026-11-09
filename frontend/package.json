@@ -5,9 +5,11 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "api:types": "openapi-typescript docs/api/openapi.yaml -o src/app/core/api/schema.d.ts",
     "test": "ng test --watch=false --browsers=ChromeHeadless",
     "test:watch": "ng test",
-    "watch": "ng build --watch"
+    "watch": "ng build --watch",
+    "test:coverage": "ng test --watch=false --browsers=ChromeHeadless --code-coverage"
   },
   "private": true,
   "dependencies": {
@@ -28,6 +30,7 @@
     "@angular/cli": "^17.3.0",
     "@angular/compiler-cli": "^17.3.0",
     "typescript": "~5.4.2",
+    "openapi-typescript": "^7.4.0",
     "@types/jasmine": "~5.1.0",
     "jasmine-core": "~5.1.0",
     "karma": "~6.4.0",

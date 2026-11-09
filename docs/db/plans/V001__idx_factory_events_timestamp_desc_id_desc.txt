@@ -1,0 +1,48 @@
+# Plano de execução — idx_factory_events_timestamp_desc_id_desc
+
+Tabela: `tb_factory_events` (V001__schema_inicial.sql)
+Índice: `idx_factory_events_timestamp_desc_id_desc ("timestamp" DESC, id DESC)`
+Consulta real (EventRepositoryAdapter.findAll, RN-09/RN-11):
+  SELECT id, event_id, event_type, description, "timestamp"
+  FROM tb_factory_events
+  ORDER BY "timestamp" DESC, id DESC
+  LIMIT :size OFFSET :offset
+  (page default 20, máximo 100 itens/página)
+
+## Status
+
+**PENDENTE DE AMBIENTE.** Este workspace não tem PostgreSQL, psql nem Docker
+disponíveis, e o repositório não contém `docker-compose.yml`. Portanto
+`EXPLAIN (ANALYZE, BUFFERS)` não foi executado e não existe baseline real.
+
+Para gerar a evidência (fase 6, docs/db/plans/):
+1. Subir PostgreSQL 17 via `docker compose up` (compose a criar) ou ambiente local.
+2. Rodar Flyway V001..V004.
+3. Carregar volume representativo (fixtures Testcontainers/seed versionado).
+4. `EXPLAIN (ANALYZE, BUFFERS)` da consulta acima ANTES do índice (baseline).
+5. `EXPLAIN (ANALYZE, BUFFERS)` da consulta DEPOIS do índice.
+6. Confirmar consulta quente via `pg_stat_statements` antes de aprovar o índice.
+
+## Justificativa técnica (a confirmar com EXPLAIN real)
+
+Sem índice: PostgreSQL faz Seq Scan de toda a tabela + Sort explícito
+(`ExternalMerge` se não couber em `work_mem`), custo proporcional ao total de
+linhas, independentemente de `:size`/`:offset`. Ordenação por `timestamp` não é
+derivável da PK (`id`).
+
+Com índice (`"timestamp" DESC, id DESC`): Index Scan (backward) já entrega as
+linhas na ordem exigida, parando após `:offset + :size` entradas do índice.
+Buffer hits limitados às páginas do índice necessárias; custo independente do
+tamanho total da tabela quando `:offset` é pequeno.
+
+Caveat: `OFFSET` alto ainda lê `offset + size` entradas do índice (scan
+disfarçado). RN-09 limita página a 100 itens; para paginação profunda adotar
+keyset (`WHERE ("timestamp", id) < ($1, $2)`) — decisão a tomar com baseline
+real.
+
+Custo de escrita: índice composto adiciona custo em INSERT de evento (1 evento =
+1 insert; baixa frequência relativa à leitura paginada). Aceitável.
+
+Arquivo esperado após medição: `<plano antes>` + `<plano depois>` +
+comparação de custo, linhas estimadas vs. reais, tipo de scan e custo de
+escrita, arquivados neste diretório (vide docs/db/plans/README.md).
