@@ -1,0 +1,754 @@
+openapi: 3.1.0
+jsonSchemaDialect: "https://spec.openapis.org/oas/3.1/dialect/base"
+info:
+  title: API de Eventos de Fábrica — events-api
+  version: "1.0.0"
+  description: |
+    Registro, consulta e estado de saga de eventos de fábrica (PRODUCTION, MAINTENANCE, QUALITY).
+    Fonte da verdade do contrato da `events-api` (Spring Boot 4 / Java 25).
+    Regra de negócio citada como `RN-xx`: docs/spec/regras-negocio.md.
+    Catálogo de erros (type ↔ RN-xx ↔ status ↔ code): docs/api/errors.md (extraído de docs/spec/erros.md).
+
+    Contrato da fundação hexagonal consolidado: idempotência operacional por `Idempotency-Key`
+    (RFC 9457 para erros; replay com mesma resposta), erros como `application/problem+json`
+    (RFC 9457) com extensão `code`/`violations[]`, e consulta de estado de saga em
+    `GET /v1/sagas/{sagaId}` (saga síncrona no fluxo QUALITY — ADR-0004).
+  contact:
+    name: Squad backend-java
+  license:
+    name: Proprietário - Fujitsu
+    url: https://api.factory/legal
+servers:
+  - url: https://api.factory/v1
+    description: Produção
+  - url: http://localhost:8080/v1
+    description: Desenvolvimento local
+tags:
+  - name: eventos
+    description: "Eventos de fábrica: registro idempotente, consulta paginada e obtenção por ID."
+  - name: sagas
+    description: Consulta do estado persistido de sagas orquestradas (registro QUALITY → auditoria).
+paths:
+  /v1/events:
+    post:
+      operationId: registrarEvento
+      tags: [eventos]
+      summary: Registrar evento de fábrica
+      description: |
+        Recebe um evento de fábrica, valida a entrada (RN-01), impede duplicidade de `eventId`
+        (RN-02, 409 `duplicate-event`) e garante replay idempotente pelo cabeçalho
+        `Idempotency-Key` (RN-03, RN-04, RN-05; ADR-0003).
+        Quando `eventType` é QUALITY, o registro cruza agregados (evento + log de auditoria)
+        por saga orquestrada com compensação (RN-06, RN-07; ADR-0004). O fluxo é **síncrono**:
+        evento e auditoria gravam na mesma unidade de trabalho do banco de dados e o cliente
+        recebe 201 dentro do orçamento de p95 ≤ 300 ms (RN-10). Não há 202/Location porque não
+        há processamento assíncrono de longa duração; o estado da saga fica persistido e
+        consultável em `GET /v1/sagas/{sagaId}` (operação `consultarSaga`).
+        Não existem operações PUT/PATCH/DELETE: `eventId`, `eventType`, `description` e
+        `timestamp` são imutáveis após a criação (RN-08) e eventos não são excluídos (RN-22).
+        Exigência de autenticação: apenas papel `operador` (RN-13). Limite de taxa: 100 req/min
+        por usuário autenticado (RN-15, 429). Limite de corpo: 1 MB (RN-16, 413).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterEventRequest'
+            example:
+              eventId: EVT-1001
+              eventType: PRODUCTION
+              description: Linha Ativa
+              timestamp: "2026-05-20T13:00:00Z"
+      responses:
+        '201':
+          description: "Evento registrado com sucesso (criado). Operação idempotente: replay da mesma `Idempotency-Key` devolve a mesma resposta do processamento original."
+          headers:
+            Idempotency-Replayed:
+              description: "'true' quando a resposta é replay de uma execução anterior com a mesma Idempotency-Key; ausente na primeira execução."
+              schema:
+                type: boolean
+              example: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+              example:
+                eventId: EVT-1001
+                eventType: PRODUCTION
+                description: Linha Ativa
+                timestamp: "2026-05-20T13:00:00Z"
+        '200':
+          description: |
+            Replay idempotente (RN-03): mesma `Idempotency-Key` com mesmo corpo devolve
+            exatamente a mesma resposta do processamento original (mesmo status e mesmo
+            corpo). Nenhum efeito duplicado. O cabeçalho `Idempotency-Replayed: true`
+            sinaliza que a resposta foi servida do armazenamento de idempotência.
+          headers:
+            Idempotency-Replayed:
+              description: "'true' indica replay idempotente."
+              schema:
+                type: boolean
+              example: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+              example:
+                eventId: EVT-1001
+                eventType: PRODUCTION
+                description: Linha Ativa
+                timestamp: "2026-05-20T13:00:00Z"
+        '400':
+          $ref: '#/components/responses/Problem400Validation'
+        '401':
+          $ref: '#/components/responses/Problem401Unauthorized'
+        '403':
+          $ref: '#/components/responses/Problem403Forbidden'
+        '409':
+          description: Conflito (RN-02, RN-04, RN-05).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                duplicate-event:
+                  $ref: '#/components/examples/ProblemDuplicateEvent'
+                idempotency-key-reused:
+                  $ref: '#/components/examples/ProblemIdempotencyKeyReused'
+                idempotency-in-progress:
+                  $ref: '#/components/examples/ProblemIdempotencyInProgress'
+        '413':
+          $ref: '#/components/responses/Problem413TooLarge'
+        '429':
+          $ref: '#/components/responses/Problem429TooManyRequests'
+        '500':
+          description: Erro interno (RN-07, exceção inesperada).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                internal-error:
+                  $ref: '#/components/examples/ProblemInternalError'
+                audit-compensation-required:
+                  $ref: '#/components/examples/ProblemAuditCompensationRequired'
+    get:
+      operationId: listarEventos
+      tags: [eventos]
+      summary: Listar eventos de fábrica paginados
+      description: |
+        Consulta paginada de eventos registrados (RN-09). Ordenação: `timestamp` decrescente;
+        desempate por `id` interno decrescente. Página padrão 20 itens; máximo 100 itens por
+        página. Leitura direta, sem cache de leitura — dado commitado aparece imediatamente
+        (RN-21). No máximo 3 consultas ao banco por requisição; sem N+1 (RN-12).
+        Exigência de autenticação: papéis `operador` ou `gerente` (RN-14).
+        Atende o direito de acesso do titular: consulta os campos do evento, incluindo
+        `description` (RN-19). `description` é confidencial (RN-17) e só é devolvido a
+        papéis autorizados; mascarado em logs de aplicação (RN-20).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: Página de eventos obtida com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponsePage'
+              example:
+                content:
+                  - eventId: EVT-1002
+                    eventType: MAINTENANCE
+                    description: Revisão preventiva
+                    timestamp: "2026-05-20T13:10:00Z"
+                  - eventId: EVT-1001
+                    eventType: PRODUCTION
+                    description: Linha Ativa
+                    timestamp: "2026-05-20T13:00:00Z"
+                page: 0
+                size: 20
+                sort:
+                  - timestamp,desc
+                totalElements: 2
+                totalPages: 1
+                first: true
+                last: true
+                numberOfElements: 2
+                empty: false
+        '400':
+          $ref: '#/components/responses/Problem400Validation'
+        '401':
+          $ref: '#/components/responses/Problem401Unauthorized'
+        '403':
+          $ref: '#/components/responses/Problem403Forbidden'
+        '500':
+          $ref: '#/components/responses/Problem500Internal'
+  /v1/events/{eventId}:
+    get:
+      operationId: obterEvento
+      tags: [eventos]
+      summary: Obter evento por ID
+      description: |
+        Retorna o evento identificado por `eventId` (RN-09: leitura direta, frescor imediato,
+        RN-21). `description` é confidencial (RN-17) — devolvido apenas a papéis autorizados
+        (RN-20). Não existe alteração nem exclusão de evento (RN-08, RN-22).
+        Exigência de autenticação: papéis `operador` ou `gerente` (RN-14).
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: eventId
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: EVT-1001
+          description: ID do evento (interno, LGPD RN-17).
+      responses:
+        '200':
+          description: Evento encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+              example:
+                eventId: EVT-1001
+                eventType: PRODUCTION
+                description: Linha Ativa
+                timestamp: "2026-05-20T13:00:00Z"
+        '400':
+          $ref: '#/components/responses/Problem400Validation'
+        '401':
+          $ref: '#/components/responses/Problem401Unauthorized'
+        '403':
+          $ref: '#/components/responses/Problem403Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem404NotFound'
+        '500':
+          $ref: '#/components/responses/Problem500Internal'
+  /v1/sagas/{sagaId}:
+    get:
+      operationId: consultarSaga
+      tags: [sagas]
+      summary: Consultar estado de saga orquestrada
+      description: |
+        Consulta o estado persistido de uma instância de saga (tabelas `saga_instance` /
+        `saga_step`; nunca em memória). Estados: `STARTED`, `IN_PROGRESS`, `SUCCEEDED`,
+        `FAILED`, `FAILED_COMPENSATED`, `COMPENSATED` (ADR-0004). O `error`, quando presente,
+        está sanitizado (sem stack trace nem dado pessoal). Recurso operacional: iniciação de
+        saga não usa 202 (registro é síncrono; veja `registrarEvento`), mas o estado da saga
+        fica consultável para rastreabilidade e auditoria (RN-06, RN-07).
+        Exigência de autenticação: papéis `operador` ou `gerente`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sagaId
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+          description: Identificador da instância de saga.
+      responses:
+        '200':
+          description: Estado da saga obtido com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaState'
+              example:
+                sagaId: 550e8400-e29b-41d4-a716-446655440000
+                status: SUCCEEDED
+                currentStep: gravar-auditoria-qualidade
+                steps:
+                  - step: registrar-evento
+                    status: SUCCEEDED
+                    attempts: 1
+                  - step: gravar-auditoria-qualidade
+                    status: SUCCEEDED
+                    attempts: 1
+                error: null
+                createdAt: "2026-11-05T13:00:00Z"
+                updatedAt: "2026-11-05T13:00:02Z"
+        '401':
+          $ref: '#/components/responses/Problem401Unauthorized'
+        '403':
+          $ref: '#/components/responses/Problem403Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem404NotFound'
+        '500':
+          $ref: '#/components/responses/Problem500Internal'
+components:
+  schemas:
+    Problem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://api.factory/events/errors/validation-error
+          description: "URI estável que identifica a classe de erro (catálogo: docs/api/errors.md)."
+        title:
+          type: string
+          example: Erro de validação de entrada
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "O ID do evento (eventId) é obrigatório."
+          description: "Mensagem legível ao usuário; pode incluir contexto (ex.: eventId conflitante)."
+        instance:
+          type: string
+          format: uri-reference
+          example: /v1/events#req-550e8400-e29b-41d4-a716-446655440000
+          description: Identificador de correlação (requestId) da requisição; nunca dado pessoal nem segredo.
+        code:
+          type: string
+          description: Slug do erro no catálogo `docs/api/errors.md` (E-xx / RN-xx).
+          example: validation-error
+        errors:
+          type: object
+          description: Campos inválidos (mapa campo → mensagem), quando status 400.
+          additionalProperties:
+            type: string
+          example:
+            eventId: "O ID do evento (eventId) é obrigatório."
+        violations:
+          type: array
+          description: Campos que falharam na validação (alternativa estruturada a `errors`).
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: eventId
+              message:
+                type: string
+                example: "O ID do evento (eventId) é obrigatório."
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-11-05T13:00:00Z"
+        requestId:
+          type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+      additionalProperties: true
+      description: Problema da API conforme RFC 9457 com extensões `code`, `errors`/`violations`, `timestamp` e `requestId`. Content-Type `application/problem+json`.
+    RegisterEventRequest:
+      type: object
+      required:
+        - eventId
+        - eventType
+        - description
+        - timestamp
+      properties:
+        eventId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: EVT-1001
+          description: ID do evento (não vazio, até 100 caracteres; único — RN-01, RN-02).
+        eventType:
+          $ref: '#/components/schemas/EventType'
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          example: Linha Ativa
+          description: Descrição do evento (não vazio, até 1000 caracteres; confidencial — RN-17).
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-05-20T13:00:00Z"
+          description: Instante ISO 8601 válido (RN-01). Offset-preservante; legado sem offset interpretado em America/Sao_Paulo.
+      additionalProperties: false
+    EventResponse:
+      type: object
+      required:
+        - eventId
+        - eventType
+        - description
+        - timestamp
+      properties:
+        eventId:
+          type: string
+          example: EVT-1001
+        eventType:
+          $ref: '#/components/schemas/EventType'
+        description:
+          type: string
+          example: Linha Ativa
+          description: Confidencial (RN-17); devolvido apenas a papéis autorizados; mascarado em logs (RN-20).
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-05-20T13:00:00Z"
+      additionalProperties: false
+    EventResponsePage:
+      type: object
+      required:
+        - content
+        - page
+        - size
+        - totalElements
+        - totalPages
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventResponse'
+        page:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 0
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+          example: 20
+        sort:
+          type: array
+          items:
+            type: string
+          default:
+            - timestamp,desc
+          example:
+            - timestamp,desc
+        totalElements:
+          type: integer
+          example: 2
+        totalPages:
+          type: integer
+          example: 1
+        first:
+          type: boolean
+          example: true
+        last:
+          type: boolean
+          example: true
+        numberOfElements:
+          type: integer
+          example: 2
+        empty:
+          type: boolean
+          example: false
+      additionalProperties: false
+    EventType:
+      type: string
+      enum:
+        - PRODUCTION
+        - MAINTENANCE
+        - QUALITY
+      example: PRODUCTION
+      description: Tipo do evento (RN-01).
+    SagaState:
+      type: object
+      required:
+        - sagaId
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        status:
+          type: string
+          enum:
+            - STARTED
+            - IN_PROGRESS
+            - SUCCEEDED
+            - FAILED
+            - FAILED_COMPENSATED
+            - COMPENSATED
+          example: SUCCEEDED
+        currentStep:
+          type: string
+          example: gravar-auditoria-qualidade
+          description: Passo atual da saga orquestrada.
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/SagaStep'
+        error:
+          type:
+            - string
+            - "null"
+          description: Erro sanitizado, quando houver (sem stack trace nem dado pessoal).
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-11-05T13:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-11-05T13:00:02Z"
+      additionalProperties: false
+    SagaStep:
+      type: object
+      required:
+        - step
+        - status
+        - attempts
+      properties:
+        step:
+          type: string
+          example: gravar-auditoria-qualidade
+        status:
+          type: string
+          enum:
+            - STARTED
+            - IN_PROGRESS
+            - SUCCEEDED
+            - FAILED
+            - FAILED_COMPENSATED
+            - COMPENSATED
+          example: SUCCEEDED
+        attempts:
+          type: integer
+          example: 1
+          description: Número de tentativas (retry com backoff + jitter, limite 3 — ADR-0004).
+        error:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+      description: |
+        Chave de idempotência operacional gerada pelo cliente (RN-03, RN-04, RN-05; ADR-0003).
+        Mesma chave + mesmo corpo dentro da janela de retenção (24 h) devolvem a resposta
+        idêntica ao primeiro processamento, sem efeito duplicado. Chave reutilizada com corpo
+        diferente → 409 `idempotency-key-reused`; chave em execução concorrente →
+        409 `idempotency-in-progress`. Ausência do cabeçalho → 400 (E-01).
+        O domínio não conhece este cabeçalho; é tratado no filtro do adaptador web.
+    Page:
+      in: query
+      name: page
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      example: 0
+      description: Número da página (base 0). Padrão 0.
+    Size:
+      in: query
+      name: size
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
+      description: Itens por página. Máximo 100 (RN-09). Padrão 20.
+    Sort:
+      in: query
+      name: sort
+      required: false
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          type: string
+      example:
+        - timestamp,desc
+      description: "Critério de ordenação. Padrão imposto: timestamp decrescente, desempate por id interno decrescente (RN-09)."
+  responses:
+    Problem400Validation:
+      description: Erro de validação de entrada (RN-01; cabeçalho Idempotency-Key ausente → 400, ADR-0003 item 4).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/validation-error
+            title: Erro de validação de entrada
+            status: 400
+            detail: "O ID do evento (eventId) é obrigatório."
+            instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440000
+            code: validation-error
+            errors:
+              eventId: "O ID do evento (eventId) é obrigatório."
+            timestamp: "2026-11-05T13:00:00Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440000
+    Problem401Unauthorized:
+      description: Não autenticado (RN-13, RN-14).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/unauthorized
+            title: Não autenticado
+            status: 401
+            detail: Autenticação necessária para acessar este recurso.
+            instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440005
+            timestamp: "2026-11-05T13:00:05Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440005
+    Problem403Forbidden:
+      description: Acesso negado (papel sem permissão; RN-13, RN-14).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/forbidden
+            title: Acesso negado
+            status: 403
+            detail: Seu papel não tem permissão para executar esta ação.
+            instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440005
+            timestamp: "2026-11-05T13:00:05Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440005
+    Problem404NotFound:
+      description: Recurso não encontrado.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/not-found
+            title: Recurso não encontrado
+            status: 404
+            detail: Recurso não encontrado.
+            instance: /v1/events/EVT-9999#req-550e8400-e29b-41d4-a716-446655440006
+            timestamp: "2026-11-05T13:00:06Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440006
+    Problem413TooLarge:
+      description: Corpo da requisição excede o limite de 1 MB (RN-16).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/payload-too-large
+            title: Corpo da requisição muito grande
+            status: 413
+            detail: O corpo da requisição excede o limite de 1 MB.
+            instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440007
+            timestamp: "2026-11-05T13:00:07Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440007
+    Problem429TooManyRequests:
+      description: "Limite de taxa excedido: 100 requisições por minuto por usuário autenticado (RN-15; PA-01 em aberto — suposição 100)."
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/too-many-requests
+            title: Limite de taxa excedido
+            status: 429
+            detail: Limite de 100 requisições por minuto excedido. Tente novamente mais tarde.
+            instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440008
+            timestamp: "2026-11-05T13:00:08Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440008
+    Problem500Internal:
+      description: Erro interno sem detalhes expostos (exceção inesperada ou falha de infraestrutura).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.factory/events/errors/internal-error
+            title: Erro interno
+            status: 500
+            detail: Erro interno. Tente novamente ou informe o identificador ao suporte.
+            instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440009
+            code: internal-error
+            timestamp: "2026-11-05T13:00:09Z"
+            requestId: 550e8400-e29b-41d4-a716-446655440009
+  examples:
+    ProblemDuplicateEvent:
+      summary: Evento duplicado (RN-02, E-02)
+      value:
+        type: https://api.factory/events/errors/duplicate-event
+        title: Evento duplicado
+        status: 409
+        detail: "O evento com ID 'EVT-DUP' já foi processado anteriormente."
+        instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440001
+        code: duplicate-event
+        timestamp: "2026-11-05T13:00:01Z"
+        requestId: 550e8400-e29b-41d4-a716-446655440001
+    ProblemIdempotencyKeyReused:
+      summary: Idempotency-Key reutilizada com corpo diferente (RN-04, E-03)
+      value:
+        type: https://api.factory/events/errors/idempotency-key-reused
+        title: Chave de idempotência reutilizada com payload diferente
+        status: 409
+        detail: "A Idempotency-Key já foi processada com um corpo diferente. Reutilize a chave apenas com o mesmo payload."
+        instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440002
+        code: idempotency-key-reused
+        timestamp: "2026-11-05T13:00:02Z"
+        requestId: 550e8400-e29b-41d4-a716-446655440002
+    ProblemIdempotencyInProgress:
+      summary: Execução de idempotência em andamento (RN-05, E-04)
+      value:
+        type: https://api.factory/events/errors/idempotency-in-progress
+        title: Execução de idempotência em andamento
+        status: 409
+        detail: "Uma execução com esta Idempotency-Key já está em andamento. Tente novamente em instantes."
+        instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440003
+        code: idempotency-in-progress
+        timestamp: "2026-11-05T13:00:03Z"
+        requestId: 550e8400-e29b-41d4-a716-446655440003
+    ProblemAuditCompensationRequired:
+      summary: Falha na auditoria com compensação executada (RN-07, E-05)
+      value:
+        type: https://api.factory/events/errors/audit-compensation-required
+        title: Falha na auditoria com compensação executada
+        status: 500
+        detail: "Não foi possível concluir o registro: o log de auditoria QUALITY não pôde ser gravado. A compensação foi executada e o evento não foi persistido."
+        instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440004
+        code: audit-compensation-required
+        timestamp: "2026-11-05T13:00:04Z"
+        requestId: 550e8400-e29b-41d4-a716-446655440004
+    ProblemInternalError:
+      summary: Erro interno (E-13)
+      value:
+        type: https://api.factory/events/errors/internal-error
+        title: Erro interno
+        status: 500
+        detail: Erro interno. Tente novamente ou informe o identificador ao suporte.
+        instance: /v1/events#req-550e8400-e29b-41d4-a716-446655440009
+        code: internal-error
+        timestamp: "2026-11-05T13:00:09Z"
+        requestId: 550e8400-e29b-41d4-a716-446655440009
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token de acesso (JWT). Papéis: `operador` (POST /v1/events; RN-13) e
+        `operador` / `gerente` (GET; RN-14). Sem token → 401 (E-11); papel não autorizado → 403 (E-12).
+externalDocs:
+  url: https://github.com/jeandro/control-gestao-imoveis
+  description: Projeto de referência da arquitetura hexagonal
