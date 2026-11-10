@@ -17,7 +17,7 @@ import com.factory.events.domain.port.out.OutboxPort;
 import com.factory.events.domain.port.out.SagaInstancePort;
 import com.factory.events.domain.port.out.SagaStepPort;
 import com.factory.events.application.saga.RegisterEventSaga;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;

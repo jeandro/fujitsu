@@ -13,7 +13,7 @@ import com.factory.events.domain.port.out.EventRepositoryPort;
 import com.factory.events.domain.port.out.OutboxPort;
 import com.factory.events.domain.port.out.SagaInstancePort;
 import com.factory.events.domain.port.out.SagaStepPort;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;

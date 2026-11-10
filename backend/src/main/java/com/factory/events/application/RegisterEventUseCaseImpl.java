@@ -9,7 +9,7 @@ import com.factory.events.domain.port.out.AuditRepositoryPort;
 import com.factory.events.domain.port.out.EventRepositoryPort;
 import com.factory.events.domain.port.out.OutboxPort;
 import com.factory.events.application.saga.RegisterEventSaga;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

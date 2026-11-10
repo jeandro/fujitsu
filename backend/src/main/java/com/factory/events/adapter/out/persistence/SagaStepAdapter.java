@@ -1,6 +1,6 @@
 package com.factory.events.adapter.out.persistence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.factory.events.domain.model.AuditLog;
 import com.factory.events.domain.model.EventType;
 import com.factory.events.domain.model.FactoryEvent;
